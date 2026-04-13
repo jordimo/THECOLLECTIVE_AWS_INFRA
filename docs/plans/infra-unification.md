@@ -183,13 +183,33 @@ services:
     container_name: redis
     # ...
 
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: langfuse
+    # Port 3030 exposed, access via SSH tunnel on servers
+    # or https://langfuse.local on dev
+    # ...
+
 networks:
   infra:
     name: infra
     driver: bridge
 ```
 
-Same file on local, DO, AWS. Only difference is `.env` (Postgres password, TLS config).
+Same file on local, DO, AWS. Only difference is `.env` (Postgres password, TLS config, Langfuse secrets).
+
+**Shared services available to all projects:**
+
+| Service | From containers | From host (dev) | From host (server) |
+|---|---|---|---|
+| Postgres | `postgres:5432` | `localhost:5432` | Internal only |
+| Redis | `redis:6379` | `localhost:6379` | Internal only |
+| Langfuse | `langfuse:3000` | `https://langfuse.local` | SSH tunnel `localhost:3030` |
+| Traefik | N/A | `https://*.local` | Ports 80/443 |
+
+Projects connect to Langfuse via `LANGFUSE_BASE_URL`:
+- **Local:** `https://langfuse.local` or `http://langfuse:3000`
+- **Servers:** `http://langfuse:3000` (internal Docker network, no tunnel needed from containers)
 
 ### Deploy script with targets
 
