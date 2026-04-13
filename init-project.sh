@@ -147,7 +147,7 @@ ok "Containers running"
 # 6. Run migrations
 # ---------------------------------------------------------------------------
 info "Running database migrations..."
-ssh_cmd "docker exec ${NAME}-api npx drizzle-kit migrate" 2>&1
+ssh_cmd "docker exec -w /app/apps/api ${NAME}-api npx drizzle-kit migrate" 2>&1
 ok "Migrations applied"
 
 # ---------------------------------------------------------------------------
