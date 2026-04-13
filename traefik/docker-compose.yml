@@ -5,6 +5,7 @@
 #   - Traefik: Reverse proxy, path-based routing on public IP
 #   - PostgreSQL: Shared database (create DB per project)
 #   - Redis: Shared cache (use DB 0-15 per project)
+#   - Langfuse: LLM observability (http://<IP>/langfuse)
 #
 # Usage:
 #   docker compose up -d          # Start all services
@@ -89,6 +90,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Langfuse - LLM Observability
+  # ---------------------------------------------------------------------------
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: langfuse
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/langfuse
+      - NEXTAUTH_SECRET=${LANGFUSE_SECRET:?Set LANGFUSE_SECRET in .env}
+      - SALT=${LANGFUSE_SALT:?Set LANGFUSE_SALT in .env}
+      - NEXTAUTH_URL=http://52.72.211.242/langfuse
+      - TELEMETRY_ENABLED=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.langfuse.rule=PathPrefix(`/langfuse`)"
+      - "traefik.http.routers.langfuse.entrypoints=web"
+      - "traefik.http.middlewares.langfuse-strip.stripprefix.prefixes=/langfuse"
+      - "traefik.http.routers.langfuse.middlewares=langfuse-strip"
+      - "traefik.http.services.langfuse.loadbalancer.server.port=3000"
 
 networks:
   traefik-public:
