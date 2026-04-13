@@ -59,7 +59,7 @@ deploy_project() {
     ssh_cmd "cd ${project_dir} && git pull"
 
     echo -e "${CYAN}[${name}] Rebuilding containers...${NC}"
-    ssh_cmd "cd ${project_dir} && docker compose up -d --build"
+    ssh_cmd "cd ${project_dir} && docker compose -f docker-compose.vm.yml up -d --build"
 
     echo -e "${GREEN}[${name}] Done — http://52.72.211.242/${name}${NC}"
 }
@@ -69,7 +69,7 @@ deploy_all() {
 
     echo ""
     local projects
-    projects=$(ssh_cmd "find ${VM_APP_DIR} -maxdepth 2 -name 'docker-compose.yml' -not -path '*/Deployer/*' -exec dirname {} \;" 2>/dev/null)
+    projects=$(ssh_cmd "find ${VM_APP_DIR} -maxdepth 2 -name 'docker-compose.vm.yml' -exec dirname {} \;" 2>/dev/null)
 
     for project_dir in $projects; do
         local name=$(basename "$project_dir")
