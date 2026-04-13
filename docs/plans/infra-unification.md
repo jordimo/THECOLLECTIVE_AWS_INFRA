@@ -164,6 +164,134 @@ OPENAI_API_KEY=
 
 Each server has its own `.env` with the right `DOMAIN` and `DATABASE_URL`. Everything else is the same.
 
+### Central registry (`registry.yml`)
+
+Single source of truth for all shared services AND apps across all environments. Lives in the infra repo root.
+
+```yaml
+# =============================================================================
+# Registry — all services and apps across all environments
+# =============================================================================
+# To add a service: add here + add to docker-compose.yml
+# To add an app: add here + create repo with docker-compose.prod.yml
+# Scripts (deploy.sh, setup-env.sh) read this file for auto-configuration.
+# =============================================================================
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    port: 5432
+    env_var: DATABASE_URL
+    env_template: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME}"
+    dev_exposed: true
+    prod_exposed: false
+
+  redis:
+    image: redis:7-alpine
+    port: 6379
+    env_var: REDIS_URL
+    env_template: "redis://redis:6379/${REDIS_DB}"
+    dev_exposed: true
+    prod_exposed: false
+
+  langfuse:
+    image: langfuse/langfuse:2
+    port: 3000
+    external_port: 3030
+    env_var: LANGFUSE_BASE_URL
+    env_template: "http://langfuse:3000"
+    dev_exposed: true
+    prod_exposed: false
+
+  traefik:
+    image: traefik:v3.2
+    ports: [80, 443, 8080]
+    dev_exposed: true
+    prod_exposed: true
+
+  # Future — just add here:
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   port: 9090
+  #   env_var: PROMETHEUS_URL
+  #   env_template: "http://prometheus:9090"
+  #
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   port: 3000
+  #   external_port: 3031
+  #   env_var: GRAFANA_URL
+  #   env_template: "http://grafana:3000"
+
+apps:
+  marie:
+    repo: jordimo/Marie
+    domain:
+      do: marie.lostriver.llc
+      aws: null
+      local: marie.local
+    containers:
+      api: { port: 3000 }
+      web: { port: 3001 }
+    db: marie
+    redis_db: 0
+    deploy_key: true
+
+  caitie:
+    repo: jordimo/Caitie
+    domain:
+      do: caitie.app
+      local: caitie.local
+    containers:
+      api: { port: 3000 }
+      web: { port: 5173 }
+      admin: { port: 3002 }
+      webhook: { port: 3001 }
+      worker: {}
+    db: caitie_db
+    redis_db: 1
+
+  newsintel:
+    repo: jordimo/newsintel
+    domain:
+      do: newsintel.lostriver.llc
+      local: newsintel.local
+    containers:
+      backend: { port: 8000 }
+      frontend: { port: 8080 }
+    db: newsintel
+    redis_db: 2
+
+  company-intel:
+    repo: jordimo/company-intel
+    domain:
+      do: company-intel.lostriver.llc
+      local: company-intel.local
+    containers:
+      api: { port: 8000 }
+      web: { port: 80 }
+      worker: {}
+    db: company_intel
+    redis_db: 3
+
+  vaultwarden:
+    repo: null
+    domain:
+      do: vault.lostriver.llc
+    containers:
+      server: { port: 80 }
+    db: null
+```
+
+**What this enables:**
+
+- **One place to check** what's running, on what port, on which server
+- **No port conflicts** — all ports visible at a glance, Redis DBs allocated explicitly
+- **Easy to add services** — add to `registry.yml` + `docker-compose.yml`, projects adopt via `.env`
+- **Easy to add apps** — add to `registry.yml`, create repo with `docker-compose.prod.yml`
+- **Scripts can read it** — `deploy.sh`, `setup-env.sh`, `init-project.sh` use the registry for auto-configuration
+- **Works across platforms** — domains per environment, same service names everywhere
+
 ### One infra compose (all environments)
 
 ```yaml
