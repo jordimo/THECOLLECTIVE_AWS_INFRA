@@ -31,5 +31,14 @@ LANGFUSE_URL=http://localhost:3030
 LANGFUSE_BIND=127.0.0.1
 LANGFUSE_TRAEFIK=false
 
+# --- Umami ---
+# Generate secret: openssl rand -base64 32
+UMAMI_SECRET=
+UMAMI_BIND=127.0.0.1
+UMAMI_TRAEFIK=true
+UMAMI_DOMAIN=analytics.lostriver.llc
+UMAMI_TLS=true
+UMAMI_CERTRESOLVER=letsencrypt
+
 # --- Volumes (preserve existing DO data) ---
 TRAEFIK_VOLUME=caitie_traefik_letsencrypt

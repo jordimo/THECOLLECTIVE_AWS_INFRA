@@ -137,6 +137,42 @@ services:
         max-file: "3"
 
   # ---------------------------------------------------------------------------
+  # Umami - Web Analytics
+  # ---------------------------------------------------------------------------
+  # Setup after first start:
+  #   1. Open http://localhost:3040 (or https://analytics.lostriver.llc on DO)
+  #   2. Login with admin / umami (change password immediately)
+  #   3. Add a website → copy the tracking script to your app's <head>
+  #   4. For custom events (Mac apps), use the POST /api/send endpoint
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: umami
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/umami
+      - APP_SECRET=${UMAMI_SECRET:-local-umami-secret-dev-only}
+      - DISABLE_TELEMETRY=1
+    ports:
+      - "${UMAMI_BIND:-0.0.0.0}:3040:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - infra
+    labels:
+      - "traefik.enable=${UMAMI_TRAEFIK:-false}"
+      - "traefik.http.routers.umami.rule=Host(`${UMAMI_DOMAIN:-analytics.local}`)"
+      - "traefik.http.routers.umami.entrypoints=websecure"
+      - "traefik.http.routers.umami.tls=${UMAMI_TLS:-true}"
+      - "traefik.http.routers.umami.tls.certresolver=${UMAMI_CERTRESOLVER:-}"
+      - "traefik.http.services.umami.loadbalancer.server.port=3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
   # Mailpit - Email Catcher (local dev only)
   # ---------------------------------------------------------------------------
   mailpit:
