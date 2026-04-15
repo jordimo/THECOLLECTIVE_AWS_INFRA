@@ -95,7 +95,7 @@ Follow these steps to go from zero to a deployed app. Example uses a project cal
 ```bash
 # DO
 ssh isidora
-docker exec -it postgres psql -U caitie_admin_db
+docker exec -it postgres psql -U postgres
 CREATE DATABASE acme;
 \q
 

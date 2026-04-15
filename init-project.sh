@@ -1,35 +1,32 @@
 #!/bin/bash
 # =============================================================================
-# Initialize a project on THECOLLECTIVE_AWS01
+# Initialize a new project
 # =============================================================================
-# Run from the corporate laptop (VPN connected).
+# Works on any environment: local dev, DO (isidora), AWS (aws01).
 #
 # Usage:
-#   ./init-project.sh <name> <git-repo-url> [--api <port>] [--web <port>]
+#   ./init-project.sh <name> <git-repo-url> [--target <local|do|aws>]
 #
 # Examples:
-#   ./init-project.sh marie git@github.com:jordimo/Marie.git
-#   ./init-project.sh betty git@github.com:jordimo/Betty.git --api 3000 --web 3001
+#   ./init-project.sh acme git@github.com:jordimo/Acme.git --target do
+#   ./init-project.sh acme git@github.com:jordimo/Acme.git --target local
+#   ./init-project.sh acme git@github.com:jordimo/Acme.git --target aws
 #
 # What it does:
-#   1. Clones the repo to /app/<name> on the VM
-#   2. Creates a PostgreSQL database named <name>
-#   3. Registers Traefik routing via project.sh
-#   4. Builds and starts containers (docker-compose.vm.yml)
-#   5. Runs database migrations (drizzle-kit)
-#   6. Prompts to create a SUPER_ADMIN user
+#   1. Creates a PostgreSQL database
+#   2. Clones the repo (servers) or verifies it exists (local)
+#   3. Prompts for .env setup
+#   4. Builds and starts containers
+#   5. Runs database migrations (if drizzle-kit is available)
+#   6. Sets up local dev extras (mkcert, /etc/hosts, Traefik routing)
 #
 # Prerequisites:
-#   - VPN connected, SSH alias 'aws01' configured
-#   - Deploy key added to the GitHub repo
-#   - Infrastructure running (./start.sh)
-#   - .env file will need to be created on the VM before step 4
+#   - Infrastructure running (Traefik, Postgres, Redis on 'infra' network)
+#   - For servers: SSH alias configured (isidora, aws01)
+#   - For servers: deploy key added to the GitHub repo
 # =============================================================================
 
 set -euo pipefail
-
-VM="${VM:-aws01}"
-VM_APP_DIR="/app"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,10 +39,13 @@ ok()    { echo -e "${GREEN}✓${NC} $1"; }
 warn()  { echo -e "${YELLOW}!${NC} $1"; }
 fail()  { echo -e "${RED}✗${NC} $1"; exit 1; }
 
-ssh_cmd() { ssh "$VM" "$@"; }
-
 usage() {
-    echo "Usage: ./init-project.sh <name> <git-repo-url> [--api <port>] [--web <port>]"
+    echo "Usage: ./init-project.sh <name> <git-repo-url> [--target <local|do|aws>]"
+    echo ""
+    echo "Targets:"
+    echo "  local   Local dev (default)"
+    echo "  do      DigitalOcean (isidora)"
+    echo "  aws     AWS (aws01)"
     exit 1
 }
 
@@ -56,162 +56,259 @@ NAME="$1"
 REPO_URL="$2"
 shift 2
 
-API_PORT="3000"
-WEB_PORT="3001"
+TARGET="local"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --api) API_PORT="$2"; shift 2 ;;
-        --web) WEB_PORT="$2"; shift 2 ;;
+        --target) TARGET="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; usage ;;
     esac
 done
 
-PROJECT_DIR="${VM_APP_DIR}/${NAME}"
+# ---- Environment config ----
+case "$TARGET" in
+    local)
+        REMOTE=""
+        PROJECT_DIR="$HOME/Dev/${NAME}"
+        COMPOSE_FILE="docker-compose.yml"
+        DOMAIN="${NAME}.local"
+        LOCAL_INFRA_DIR="$HOME/Dev/local-infra"
+        ;;
+    do)
+        REMOTE="isidora"
+        PROJECT_DIR="/home/deploy/${NAME}"
+        COMPOSE_FILE="docker-compose.prod.yml"
+        DOMAIN="${NAME}.lostriver.llc"
+        ;;
+    aws)
+        REMOTE="aws01"
+        PROJECT_DIR="/app/${NAME}"
+        COMPOSE_FILE="docker-compose.prod.yml"
+        DOMAIN=""
+        ;;
+    *)
+        fail "Unknown target: ${TARGET}. Use local, do, or aws."
+        ;;
+esac
+
+run() {
+    if [ -n "$REMOTE" ]; then
+        ssh "$REMOTE" "$@"
+    else
+        eval "$@"
+    fi
+}
 
 echo ""
-echo -e "${CYAN}=== Initializing '${NAME}' on THECOLLECTIVE_AWS01 ===${NC}"
+echo -e "${CYAN}=== Initializing '${NAME}' on ${TARGET} ===${NC}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 1. Clone repo
-# ---------------------------------------------------------------------------
-info "Cloning repo..."
-if ssh_cmd "test -d ${PROJECT_DIR}"; then
-    ok "Directory ${PROJECT_DIR} already exists — skipping clone"
-else
-    ssh_cmd "git clone ${REPO_URL} ${PROJECT_DIR}"
-    ok "Cloned to ${PROJECT_DIR}"
-fi
-
-# ---------------------------------------------------------------------------
-# 2. Create database
+# 1. Create database
 # ---------------------------------------------------------------------------
 info "Checking database '${NAME}'..."
-DB_EXISTS=$(ssh_cmd "docker exec postgres psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '${NAME}'\"" 2>/dev/null || true)
+DB_EXISTS=$(run "docker exec postgres psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '${NAME}'\"" 2>/dev/null || true)
 
 if [ "$DB_EXISTS" = "1" ]; then
     ok "Database '${NAME}' already exists"
 else
-    ssh_cmd "docker exec postgres psql -U postgres -c 'CREATE DATABASE \"${NAME}\";'" >/dev/null
+    run "docker exec postgres psql -U postgres -c 'CREATE DATABASE \"${NAME}\";'" >/dev/null
     ok "Database '${NAME}' created"
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Clone repo (servers) or verify it exists (local)
+# ---------------------------------------------------------------------------
+if [ -n "$REMOTE" ]; then
+    info "Cloning repo on ${TARGET}..."
+    if run "test -d ${PROJECT_DIR}"; then
+        ok "Directory ${PROJECT_DIR} already exists — skipping clone"
+    else
+        run "git clone ${REPO_URL} ${PROJECT_DIR}"
+        ok "Cloned to ${PROJECT_DIR}"
+    fi
+else
+    info "Checking local project directory..."
+    if [ -d "$PROJECT_DIR" ]; then
+        ok "Project exists at ${PROJECT_DIR}"
+    else
+        fail "Project not found at ${PROJECT_DIR}. Clone it first: git clone ${REPO_URL} ${PROJECT_DIR}"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
 # 3. Set up .env
 # ---------------------------------------------------------------------------
-if ssh_cmd "test -f ${PROJECT_DIR}/.env"; then
+info "Checking .env..."
+if run "test -f ${PROJECT_DIR}/.env"; then
     ok ".env file exists"
 else
-    warn ".env file not found at ${PROJECT_DIR}/.env"
-    echo ""
-    echo "  Create it now. A template is available at ${PROJECT_DIR}/.env.example.vm"
-    echo ""
-    echo "  Option A — edit on the VM:"
-    echo "    ssh ${VM} 'micro ${PROJECT_DIR}/.env'"
-    echo ""
-    echo "  Option B — push from here:"
-    echo "    ssh ${VM} 'cat > ${PROJECT_DIR}/.env << EOF"
-    echo "    ...paste values..."
-    echo "    EOF'"
+    if run "test -f ${PROJECT_DIR}/.env.example"; then
+        info "Creating .env from .env.example..."
+        run "cp ${PROJECT_DIR}/.env.example ${PROJECT_DIR}/.env"
+        warn ".env created from template — edit it with the right values:"
+        if [ -n "$REMOTE" ]; then
+            echo "    ssh ${REMOTE} 'nano ${PROJECT_DIR}/.env'"
+        else
+            echo "    nano ${PROJECT_DIR}/.env"
+        fi
+    else
+        warn "No .env or .env.example found at ${PROJECT_DIR}"
+        echo "    Create .env before continuing."
+    fi
     echo ""
     read -rp "  Press Enter when .env is ready (or Ctrl+C to abort)..."
 
-    if ! ssh_cmd "test -f ${PROJECT_DIR}/.env"; then
-        fail ".env still not found. Create it and re-run this script."
+    if ! run "test -f ${PROJECT_DIR}/.env"; then
+        fail ".env still not found."
     fi
-    ok ".env file created"
+    ok ".env file ready"
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Register Traefik routing
+# 4. Local dev extras
 # ---------------------------------------------------------------------------
-info "Registering Traefik routing..."
-DYNAMIC_FILE="${VM_APP_DIR}/Deployer/traefik/dynamic/${NAME}.yml"
+if [ "$TARGET" = "local" ]; then
+    # mkcert certificate
+    info "Checking TLS certificate for ${DOMAIN}..."
+    CERT_DIR="${LOCAL_INFRA_DIR}/certs"
+    if [ -f "${CERT_DIR}/${NAME}.pem" ]; then
+        ok "Certificate exists"
+    else
+        if command -v mkcert &>/dev/null; then
+            mkcert -cert-file "${CERT_DIR}/${NAME}.pem" -key-file "${CERT_DIR}/${NAME}-key.pem" "${DOMAIN}"
+            ok "Certificate created for ${DOMAIN}"
+        else
+            warn "mkcert not installed — install it: brew install mkcert"
+        fi
+    fi
 
-if ssh_cmd "test -f ${DYNAMIC_FILE}"; then
-    ok "Routing already registered"
-else
-    ssh_cmd "cd ${VM_APP_DIR}/Deployer && ./project.sh add ${NAME} --api ${API_PORT} --web ${WEB_PORT}"
-    ok "Routing registered: /${NAME} -> web, /${NAME}/api -> api"
+    # Add certificate to Traefik TLS config
+    TLS_FILE="${LOCAL_INFRA_DIR}/dynamic/tls.yml"
+    if [ -f "$TLS_FILE" ] && ! grep -q "${NAME}.pem" "$TLS_FILE"; then
+        info "Adding certificate to Traefik TLS config..."
+        cat >> "$TLS_FILE" <<TLSEOF
+
+    - certFile: /etc/traefik/certs/${NAME}.pem
+      keyFile: /etc/traefik/certs/${NAME}-key.pem
+TLSEOF
+        ok "Certificate added to tls.yml"
+    fi
+
+    # Traefik routing config
+    ROUTING_FILE="${LOCAL_INFRA_DIR}/dynamic/${NAME}.yml"
+    if [ -f "$ROUTING_FILE" ]; then
+        ok "Traefik routing already configured"
+    else
+        info "Creating Traefik routing for ${DOMAIN}..."
+        cat > "$ROUTING_FILE" <<ROUTEEOF
+http:
+  routers:
+    ${NAME}-http:
+      rule: "Host(\`${DOMAIN}\`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: ${NAME}-web
+
+    ${NAME}-api:
+      rule: "Host(\`${DOMAIN}\`) && PathPrefix(\`/api\`)"
+      entryPoints:
+        - websecure
+      service: ${NAME}-api
+      tls: {}
+      priority: 200
+
+    ${NAME}-web:
+      rule: "Host(\`${DOMAIN}\`)"
+      entryPoints:
+        - websecure
+      service: ${NAME}-web
+      tls: {}
+      priority: 100
+
+  services:
+    ${NAME}-api:
+      loadBalancer:
+        servers:
+          - url: "http://${NAME}-api:3000"
+
+    ${NAME}-web:
+      loadBalancer:
+        servers:
+          - url: "http://${NAME}-web:5173"
+ROUTEEOF
+        ok "Routing created: https://${DOMAIN}"
+    fi
+
+    # /etc/hosts entry
+    if grep -q "${DOMAIN}" /etc/hosts; then
+        ok "/etc/hosts entry exists"
+    else
+        info "Adding ${DOMAIN} to /etc/hosts (requires sudo)..."
+        echo "127.0.0.1 ${DOMAIN}" | sudo tee -a /etc/hosts >/dev/null
+        ok "Added ${DOMAIN} to /etc/hosts"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Build and start containers
+# 5. DNS reminder (DO only)
+# ---------------------------------------------------------------------------
+if [ "$TARGET" = "do" ] && [ -n "$DOMAIN" ]; then
+    echo ""
+    warn "DNS: Add an A record in Cloudflare:"
+    echo "    ${DOMAIN} → 174.138.33.106"
+    echo ""
+    read -rp "  Press Enter when DNS is configured (or Ctrl+C to skip)..."
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Build and start containers
 # ---------------------------------------------------------------------------
 info "Building and starting containers..."
-ssh_cmd "cd ${PROJECT_DIR} && docker compose -f docker-compose.vm.yml up -d --build"
+run "cd ${PROJECT_DIR} && docker compose -f ${COMPOSE_FILE} up -d --build"
 ok "Containers running"
 
 # ---------------------------------------------------------------------------
-# 6. Run migrations
+# 7. Run migrations (if drizzle-kit available)
 # ---------------------------------------------------------------------------
-info "Running database migrations..."
-ssh_cmd "docker exec -w /app/apps/api ${NAME}-api npx drizzle-kit migrate" 2>&1
-ok "Migrations applied"
-
-# ---------------------------------------------------------------------------
-# 7. Create admin user (optional)
-# ---------------------------------------------------------------------------
-echo ""
-USER_COUNT=$(ssh_cmd "docker exec postgres psql -U postgres -d ${NAME} -tAc 'SELECT count(*) FROM users'" 2>/dev/null || echo "error")
-
-if [ "$USER_COUNT" = "error" ]; then
-    warn "Could not check users table — it may not exist yet. Skipping admin creation."
-elif [ "$USER_COUNT" -gt 0 ] 2>/dev/null; then
-    ok "Users already exist (${USER_COUNT} found) — skipping admin creation"
+info "Checking for migrations..."
+if run "docker exec ${NAME}-api which npx" &>/dev/null; then
+    info "Running drizzle-kit migrations..."
+    run "docker exec -w /app/apps/api ${NAME}-api npx drizzle-kit migrate" 2>&1 || warn "Migrations failed — you may need to run them manually"
+    ok "Migrations applied"
 else
-    echo -e "${CYAN}No users found — let's create the first SUPER_ADMIN.${NC}"
-    echo ""
-
-    read -rp "  Admin email: " ADMIN_EMAIL
-    read -rp "  Admin name:  " ADMIN_NAME
-
-    while true; do
-        read -rsp "  Password (min 8 chars, upper+lower+digit): " ADMIN_PASSWORD
-        echo ""
-        if [ ${#ADMIN_PASSWORD} -lt 8 ]; then
-            warn "Password must be at least 8 characters"; continue
-        fi
-        if ! (echo "$ADMIN_PASSWORD" | grep -q '[a-z]' && \
-             echo "$ADMIN_PASSWORD" | grep -q '[A-Z]' && \
-             echo "$ADMIN_PASSWORD" | grep -q '[0-9]'); then
-            warn "Password must contain uppercase, lowercase, and a digit"; continue
-        fi
-        break
-    done
-
-    # Hash password and create user inside the API container
-    ssh_cmd "docker exec ${NAME}-api node -e \"
-        const bcrypt = require('bcrypt');
-        const crypto = require('crypto');
-        const { Client } = require('pg');
-        (async () => {
-            const hash = await bcrypt.hash(process.argv[1], 12);
-            const tenantId = crypto.randomUUID();
-            const userId = crypto.randomUUID();
-            const client = new Client({ connectionString: process.env.DATABASE_URL });
-            await client.connect();
-            await client.query('BEGIN');
-            await client.query(\\\"INSERT INTO tenants (id, name, slug) VALUES (\\\$1, 'The Collective', 'default')\\\", [tenantId]);
-            await client.query(\\\"INSERT INTO users (id, tenant_id, email, name, password_hash, auth_provider, role) VALUES (\\\$1, \\\$2, \\\$3, \\\$4, \\\$5, 'LOCAL', 'SUPER_ADMIN')\\\", [userId, tenantId, process.argv[2], process.argv[3], hash]);
-            await client.query('COMMIT');
-            await client.end();
-            console.log('Admin created: ' + process.argv[2]);
-        })().catch(e => { console.error(e.message); process.exit(1); });
-    \" '${ADMIN_PASSWORD}' '${ADMIN_EMAIL}' '${ADMIN_NAME}'"
-
-    ok "SUPER_ADMIN user created: ${ADMIN_EMAIL}"
+    warn "No npx in ${NAME}-api container — run migrations manually if needed"
 fi
 
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo ""
-echo -e "${GREEN}=== '${NAME}' initialized ===${NC}"
+echo -e "${GREEN}=== '${NAME}' initialized on ${TARGET} ===${NC}"
 echo ""
-echo "  Web: http://52.72.211.242/${NAME}"
-echo "  API: http://52.72.211.242/${NAME}/api"
+
+case "$TARGET" in
+    local)
+        echo "  URL: https://${DOMAIN}"
+        echo "  API: https://${DOMAIN}/api"
+        ;;
+    do)
+        echo "  URL: https://${DOMAIN}"
+        echo "  API: https://${DOMAIN}/api"
+        echo "  Deploy: ./deploy.sh do ${NAME}"
+        ;;
+    aws)
+        echo "  URL: http://52.72.211.242/${NAME}"
+        echo "  API: http://52.72.211.242/${NAME}/api"
+        echo "  Deploy: ./deploy.sh aws ${NAME}"
+        ;;
+esac
+
 echo ""
-echo "  Deploy updates:  ./deploy.sh ${NAME}"
+echo "  Next steps:"
+echo "    - Set up Langfuse: ssh -L 3030:localhost:3030 ${REMOTE:-localhost}"
+echo "      Create project '${NAME}' → Settings → API Keys → copy to .env"
+echo "    - Store secrets in Bitwarden"
 echo ""
