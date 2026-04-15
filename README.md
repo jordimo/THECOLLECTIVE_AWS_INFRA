@@ -2,9 +2,11 @@
 
 Shared infrastructure for all environments: **DigitalOcean** (isidora), **AWS** (THECOLLECTIVE_AWS01), and **local dev**.
 
+One `docker-compose.yml`, all environments. Differences live in `.env`.
+
 ## What this repo provides
 
-Traefik, PostgreSQL (pgvector), Redis, and Langfuse — running on every environment with the same conventions. Projects connect via the `infra` Docker network.
+Traefik, PostgreSQL (pgvector), Redis, Langfuse, and Mailpit (local only) — running on every environment with the same conventions. Projects connect via the `infra` Docker network.
 
 ### Shared services
 
@@ -14,26 +16,46 @@ Traefik, PostgreSQL (pgvector), Redis, and Langfuse — running on every environ
 | Redis    | `redis:6379`       | `localhost:6379`         | Internal only                   |
 | Langfuse | `langfuse:3000`    | `https://langfuse.local` | SSH tunnel `localhost:3030`     |
 | Traefik  | N/A                | `https://*.local`        | Ports 80/443                    |
+| Mailpit  | `mailpit:1025`     | `localhost:8025`         | N/A (local only)                |
 
 ## Repository structure
 
 ```
 infra/
-├── docker-compose.yml        ← DO/server infra (Traefik + Let's Encrypt, pgvector, Redis, Langfuse)
-├── .env.example              ← Template for server .env
-├── dynamic/                  ← Traefik dynamic config (health checks, security headers)
-│   └── dynamic.yml
-├── traefik/                  ← AWS-specific infra (path-based routing, no TLS)
-│   ├── docker-compose.yml
-│   └── dynamic/
+├── docker-compose.yml        ← Unified infra (all environments)
+├── .env.example.local        ← Template for local dev
+├── .env.example.do           ← Template for DigitalOcean
+├── dynamic/                  ← Traefik dynamic config
+│   ├── dynamic.yml           ← Health checks, security headers (committed)
+│   ├── middlewares.yml        ← Shared middlewares (committed)
+│   ├── tls.yml               ← Local mkcert certs (gitignored)
+│   └── routing-*.yml         ← Local project routing (gitignored)
+├── certs/                    ← Local mkcert certificates (gitignored)
+├── init-project.sh           ← Set up a new project (any environment)
 ├── deploy.sh                 ← Deploy from corporate laptop over SSH
-├── init-project.sh           ← First-time project setup on a server
-├── project.sh                ← Register/remove Traefik routing (AWS, path-based)
-├── bootstrap.sh              ← Bootstrap a fresh VM (Docker, Git, clone)
-├── setup.sh / start.sh / stop.sh
+├── traefik/                  ← AWS-specific infra (path-based routing)
 └── docs/
-    ├── plans/                ← Migration and unification plans
+    ├── plans/
     └── dev-diary/
+```
+
+## Quick start
+
+### Local dev
+
+```bash
+cp .env.example.local .env
+docker compose --profile local up -d
+```
+
+Services: Traefik (`:8080`), Postgres (`:5432`), Redis (`:6379`), Langfuse (`:3030`), Mailpit (`:8025`)
+
+### Server (DO/AWS)
+
+```bash
+cp .env.example.do .env
+# Edit .env with production values
+docker compose up -d
 ```
 
 ## Environments
@@ -45,9 +67,6 @@ Primary production server. Host-based routing with Let's Encrypt TLS.
 ```
 /home/deploy/
 ├── infra/                    ← this repo
-│   ├── docker-compose.yml
-│   ├── .env
-│   └── dynamic/
 ├── marie/                    ← marie.lostriver.llc
 ├── newsintel/                ← newsintel.lostriver.llc
 ├── company-intel/            ← intel.lostriver.llc
@@ -66,48 +85,47 @@ ssh -L 8080:localhost:8080 isidora     # Traefik dashboard
 
 Internal server. Path-based routing, no TLS (VPN access only). Uses `traefik/docker-compose.yml`.
 
-**SSH:**
-```bash
-ssh aws01                              # Shell (requires VPN)
-ssh -L 3030:localhost:3030 aws01       # Langfuse UI
-```
-
 ### Local dev
 
-Uses `~/Dev/local-infra/` with mkcert TLS and `*.local` domains. Same services (Traefik, Postgres, Redis, Langfuse) on the `infra` network.
-
-## Day-to-day: deploying
-
-```bash
-# Deploy a project to DO
-./deploy.sh do marie
-
-# Deploy to AWS
-./deploy.sh aws marie
-```
+Uses `~/Dev/infra/` with mkcert TLS and `*.local` domains. Same compose file as servers, with `.env.example.local` for local-specific settings. Mailpit enabled via `COMPOSE_PROFILES=local`.
 
 ## Adding a new project
 
-Follow these steps to go from zero to a deployed app. Example uses a project called `acme`.
+### Using `init-project.sh` (recommended)
 
-### Step 1: Create the database
+The script automates database creation, repo cloning, .env setup, mkcert certificates, /etc/hosts, Traefik routing, container builds, and migrations.
 
 ```bash
-# DO
-ssh isidora
-docker exec -it postgres psql -U postgres
-CREATE DATABASE acme;
-\q
+# Local — project already cloned
+./init-project.sh acme --target local --dir ~/Dev/THECOLLECTIVE/Acme
 
-# Local
-docker exec -it postgres psql -U postgres
-CREATE DATABASE acme;
-\q
+# Local — clone and set up
+./init-project.sh acme --target local --dir ~/Dev/Acme --repo git@github.com:jordimo/Acme.git
+
+# DO (isidora) — clone from GitHub
+./init-project.sh acme --target do:isidora --repo git@github.com:jordimo/Acme.git
+
+# DO (isidora) — project already on server
+./init-project.sh acme --target do:isidora
+
+# AWS
+./init-project.sh acme --target aws --repo git@github.com:jordimo/Acme.git
+
+# Custom database name
+./init-project.sh acme --target do:isidora --db acme_production --repo git@github.com:jordimo/Acme.git
 ```
 
-### Step 2: Create deploy key on the server
+Options:
+- `--target` — **Required.** `local`, `do:<droplet>`, or `aws`
+- `--dir` — Project directory (required for local, defaults to `/home/deploy/<name>` on DO)
+- `--repo` — Git repo URL (clones if directory doesn't exist)
+- `--db` — Database name (defaults to project name)
 
-One key per repo, per server. Read-only.
+### Manual setup
+
+If you prefer manual steps or the script doesn't fit your case:
+
+#### 1. Deploy key (servers only)
 
 ```bash
 ssh isidora
@@ -115,10 +133,9 @@ ssh-keygen -t ed25519 -f ~/.ssh/github_deploy_acme -N ""
 cat ~/.ssh/github_deploy_acme.pub
 ```
 
-Add the public key at `https://github.com/<user>/Acme/settings/keys` → **Allow read access only**.
+Add at `https://github.com/<user>/Acme/settings/keys` (read-only).
 
-If this is a second deploy key on the server, add to `~/.ssh/config`:
-
+For multiple deploy keys, add to `~/.ssh/config`:
 ```
 Host github.com-acme
     HostName github.com
@@ -126,146 +143,16 @@ Host github.com-acme
     IdentityFile ~/.ssh/github_deploy_acme
 ```
 
-Then clone with: `git clone git@github.com-acme:<user>/Acme.git`
+#### 2. Project compose files
 
-### Step 3: Create Dockerfiles (multi-stage)
+Each project has two compose files:
 
-Each service gets one Dockerfile with two targets:
+- **`docker-compose.yml`** — local dev (volume mounts, hot reload, no Traefik labels)
+- **`docker-compose.prod.yml`** — any server (production builds, Traefik labels, healthchecks)
 
-```dockerfile
-# apps/api/Dockerfile
-FROM node:22-slim AS development
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-CMD ["npm", "run", "dev"]
+Differences between servers live in `.env` only (`DOMAIN`, `DATABASE_URL`).
 
-FROM node:22-slim AS production
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-CMD ["node", "dist/main.js"]
-```
-
-### Step 4: Create compose files
-
-**`docker-compose.yml`** — local dev:
-
-```yaml
-name: acme
-
-services:
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-      target: development
-    container_name: acme-api
-    env_file: .env
-    volumes:
-      - ./apps/api/src:/app/apps/api/src
-    networks:
-      - infra
-
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      target: development
-    container_name: acme-web
-    environment:
-      - VITE_API_URL=https://acme.local/api
-    volumes:
-      - ./apps/web/src:/app/apps/web/src
-    networks:
-      - infra
-
-networks:
-  infra:
-    external: true
-```
-
-**`docker-compose.prod.yml`** — any server (DO, AWS, future):
-
-```yaml
-name: acme
-
-services:
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-      target: production
-    container_name: acme-api
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      - NODE_ENV=production
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    networks:
-      - infra
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.acme-api.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)"
-      - "traefik.http.routers.acme-api.entrypoints=websecure"
-      - "traefik.http.routers.acme-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.acme-api.priority=200"
-      - "traefik.http.services.acme-api.loadbalancer.server.port=3000"
-
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      target: production
-    container_name: acme-web
-    restart: unless-stopped
-    environment:
-      - VITE_API_URL=https://${DOMAIN}/api
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3001').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    networks:
-      - infra
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.acme-web.rule=Host(`${DOMAIN}`)"
-      - "traefik.http.routers.acme-web.entrypoints=websecure"
-      - "traefik.http.routers.acme-web.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.acme-web.priority=100"
-      - "traefik.http.services.acme-web.loadbalancer.server.port=3001"
-      # HTTP -> HTTPS redirect
-      - "traefik.http.routers.acme-redirect.rule=Host(`${DOMAIN}`)"
-      - "traefik.http.routers.acme-redirect.entrypoints=web"
-      - "traefik.http.routers.acme-redirect.middlewares=acme-https-redirect@docker"
-      - "traefik.http.middlewares.acme-https-redirect.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.acme-https-redirect.redirectscheme.permanent=true"
-
-networks:
-  infra:
-    external: true
-```
-
-The **only difference** between servers is `.env`:
-
-```env
-# DO
-DOMAIN=acme.lostriver.llc
-
-# Local
-DOMAIN=acme.local
-```
-
-### Step 5: Create `.env.example`
+#### 3. `.env.example`
 
 ```env
 # --- Server-specific (change per environment) ---
@@ -286,75 +173,21 @@ PORT=3000
 NODE_ENV=production
 ```
 
-### Step 6: DNS (DO only)
+#### 4. DNS (DO only)
 
-Add an A record in Cloudflare:
+Add an A record in Cloudflare: `acme.lostriver.llc → 174.138.33.106`
 
-```
-acme.lostriver.llc  →  174.138.33.106
-```
+#### 5. Langfuse integration
 
-Traefik will auto-provision a Let's Encrypt certificate on first request.
-
-### Step 7: Clone and deploy on the server
-
-```bash
-ssh isidora
-cd /home/deploy
-git clone git@github.com-acme:<user>/Acme.git acme
-cd acme
-
-# Create .env from template
-cp .env.example .env
-# Edit .env: set DOMAIN, DATABASE_URL, secrets from Bitwarden
-
-# Build and start
-docker compose -f docker-compose.prod.yml up -d --build
-
-# Run migrations (if applicable)
-docker exec -w /app/apps/api acme-api npx drizzle-kit migrate
-```
-
-### Step 8: Langfuse integration
-
-1. Open Langfuse UI (`ssh -L 3030:localhost:3030 isidora`, then `http://localhost:3030`)
+1. Access Langfuse UI (`ssh -L 3030:localhost:3030 isidora`, then `http://localhost:3030`)
 2. **New Project** → name it "Acme"
 3. **Settings → API Keys → Create API Key**
-4. Copy `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` to the project's `.env`
-5. `LANGFUSE_BASE_URL=http://langfuse:3000` (containers use Docker network, not the tunnel)
-
-### Step 9: Store secrets in Bitwarden
-
-Add all `.env` values to a Bitwarden Secure Note. Convention: if it goes in `.env`, it goes in Bitwarden.
-
-### Step 10: Local dev setup
-
-```bash
-cd ~/Dev/Acme
-
-# Create .env
-cp .env.example .env
-# Edit: DOMAIN=acme.local, DATABASE_URL with postgres:postgres
-
-# Create local database
-docker exec -it postgres psql -U postgres -c "CREATE DATABASE acme"
-
-# Add to /etc/hosts
-echo "127.0.0.1 acme.local" | sudo tee -a /etc/hosts
-
-# Create mkcert certificate (in local-infra)
-cd ~/Dev/local-infra
-mkcert -cert-file certs/acme.pem -key-file certs/acme-key.pem acme.local
-
-# Add cert to Traefik dynamic config (dynamic/tls.yml)
-# Then add routing rules (dynamic/acme.yml)
-
-# Start
-cd ~/Dev/Acme
-docker compose up -d --build
-```
-
-Visit `https://acme.local`
+4. Add to the project's `.env`:
+   ```env
+   LANGFUSE_BASE_URL=http://langfuse:3000
+   LANGFUSE_PUBLIC_KEY=pk-lf-...
+   LANGFUSE_SECRET_KEY=sk-lf-...
+   ```
 
 ## Secrets
 
