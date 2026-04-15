@@ -367,8 +367,15 @@ esac
 
 echo ""
 echo "  Next steps:"
-echo "    - Set up Langfuse: ssh -L 3030:localhost:3030 ${REMOTE:-localhost}"
+case "$TARGET" in
+    local)
+        echo "    - Set up Langfuse: open https://langfuse.local"
+        ;;
+    *)
+        echo "    - Set up Langfuse: ssh -L 3030:localhost:3030 ${REMOTE}"
+        echo "      then open http://localhost:3030"
+        ;;
+esac
 echo "      Create project '${NAME}' → Settings → API Keys → copy to .env"
 echo "    - Store secrets in Bitwarden"
-echo "    - Update registry.yml in docs/plans/infra-unification.md"
 echo ""

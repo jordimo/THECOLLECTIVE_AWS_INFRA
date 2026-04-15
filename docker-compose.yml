@@ -117,6 +117,12 @@ services:
       - SALT=${LANGFUSE_SALT:-local-langfuse-salt-dev-only}
       - NEXTAUTH_URL=${LANGFUSE_URL:-http://localhost:3030}
       - TELEMETRY_ENABLED=false
+      # Local dev: seed default user + org on first start (set in .env)
+      - LANGFUSE_INIT_ORG_ID
+      - LANGFUSE_INIT_ORG_NAME
+      - LANGFUSE_INIT_USER_EMAIL
+      - LANGFUSE_INIT_USER_NAME
+      - LANGFUSE_INIT_USER_PASSWORD
     ports:
       - "${LANGFUSE_BIND:-0.0.0.0}:3030:3000"
     depends_on:

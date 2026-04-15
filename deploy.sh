@@ -65,7 +65,7 @@ case "$TARGET" in
         ;;
     aws)
         REMOTE="aws01"
-        INFRA_DIR="/app/Deployer"
+        INFRA_DIR="/app/infra"
         APP_DIR="/app"
         COMPOSE_FILE="docker-compose.prod.yml"
         ;;
