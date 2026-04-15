@@ -1,169 +1,146 @@
-# THECOLLECTIVE_AWS_INFRA
+# infra
 
-Infrastructure and deployment tooling for **THECOLLECTIVE_AWS01** (EC2 at `52.72.211.242`).
+Shared infrastructure for all environments: **DigitalOcean** (isidora), **AWS** (THECOLLECTIVE_AWS01), and **local dev**.
 
-## Architecture
+## What this repo provides
 
-```
-Personal laptop  →  GitHub  ←  Corporate laptop  →  VM
-  (git push)       (repos)      (deploy scripts)    (runs containers)
-```
+Traefik, PostgreSQL (pgvector), Redis, and Langfuse — running on every environment with the same conventions. Projects connect via the `infra` Docker network.
 
-- **Personal laptop**: write code, push to GitHub
-- **Corporate laptop**: runs deploy scripts over SSH (VPN required)
-- **VM**: Docker containers behind Traefik reverse proxy
+### Shared services
 
-### What runs on the VM
+| Service  | From containers     | From host (dev)          | From host (server)              |
+|----------|--------------------|--------------------------|---------------------------------|
+| Postgres | `postgres:5432`    | `localhost:5432`         | Internal only                   |
+| Redis    | `redis:6379`       | `localhost:6379`         | Internal only                   |
+| Langfuse | `langfuse:3000`    | `https://langfuse.local` | SSH tunnel `localhost:3030`     |
+| Traefik  | N/A                | `https://*.local`        | Ports 80/443                    |
 
-```
-/app/
-├── Deployer/               ← this repo (infra + scripts)
-│   ├── traefik/
-│   │   ├── docker-compose.yml   ← Traefik, Postgres, Redis, Langfuse
-│   │   └── dynamic/             ← per-project routing configs
-│   ├── deploy.sh
-│   ├── init-project.sh
-│   ├── project.sh
-│   ├── start.sh / stop.sh / setup.sh
-│   └── bootstrap.sh
-│
-├── marie/                   ← project repo (cloned via deploy key)
-│   ├── docker-compose.vm.yml
-│   └── .env
-│
-└── <future-project>/
-    ├── docker-compose.vm.yml
-    └── .env
-```
-
-### Routing
-
-Traefik is the only container exposed to the internet (port 80). Everything else is internal. Routing is path-based:
+## Repository structure
 
 ```
-http://52.72.211.242/marie      → marie-web container
-http://52.72.211.242/marie/api  → marie-api container
+infra/
+├── docker-compose.yml        ← DO/server infra (Traefik + Let's Encrypt, pgvector, Redis, Langfuse)
+├── .env.example              ← Template for server .env
+├── dynamic/                  ← Traefik dynamic config (health checks, security headers)
+│   └── dynamic.yml
+├── traefik/                  ← AWS-specific infra (path-based routing, no TLS)
+│   ├── docker-compose.yml
+│   └── dynamic/
+├── deploy.sh                 ← Deploy from corporate laptop over SSH
+├── init-project.sh           ← First-time project setup on a server
+├── project.sh                ← Register/remove Traefik routing (AWS, path-based)
+├── bootstrap.sh              ← Bootstrap a fresh VM (Docker, Git, clone)
+├── setup.sh / start.sh / stop.sh
+└── docs/
+    ├── plans/                ← Migration and unification plans
+    └── dev-diary/
 ```
 
-### Shared services (internal only)
+## Environments
 
-| Service  | Access from containers | Notes |
-|----------|----------------------|-------|
-| Postgres | `postgres:5432`      | pgvector/pg16, one DB per project |
-| Redis    | `redis:6379`         | DB 0-15 per project |
-| Langfuse | `langfuse:3000`      | SSH tunnel for UI: `ssh -L 3030:localhost:3030 aws01` |
+### DigitalOcean — isidora (174.138.33.106)
 
-## Prerequisites (corporate laptop)
-
-### SSH config
-
-Add to `~/.ssh/config`:
+Primary production server. Host-based routing with Let's Encrypt TLS.
 
 ```
-Host aws01
-    HostName 10.251.8.172
-    User ubuntu
-    IdentityFile ~/.ssh/AWSNMTNAPP001-keypair.pem
+/home/deploy/
+├── infra/                    ← this repo
+│   ├── docker-compose.yml
+│   ├── .env
+│   └── dynamic/
+├── marie/                    ← marie.lostriver.llc
+├── newsintel/                ← newsintel.lostriver.llc
+├── company-intel/            ← intel.lostriver.llc
+├── vault/                    ← vault.lostriver.llc
+└── caitie/                   ← caitie.app (currently down)
 ```
 
-### Clone this repo
+**SSH:**
+```bash
+ssh isidora                            # Shell
+ssh -L 3030:localhost:3030 isidora     # Langfuse UI
+ssh -L 8080:localhost:8080 isidora     # Traefik dashboard
+```
+
+### AWS — THECOLLECTIVE_AWS01 (10.251.8.172 via VPN)
+
+Internal server. Path-based routing, no TLS (VPN access only). Uses `traefik/docker-compose.yml`.
+
+**SSH:**
+```bash
+ssh aws01                              # Shell (requires VPN)
+ssh -L 3030:localhost:3030 aws01       # Langfuse UI
+```
+
+### Local dev
+
+Uses `~/Dev/local-infra/` with mkcert TLS and `*.local` domains. Same services (Traefik, Postgres, Redis, Langfuse) on the `infra` network.
+
+## Day-to-day: deploying
 
 ```bash
-git clone git@github.com-personal:jordimo/THECOLLECTIVE_AWS_INFRA.git ~/Dev/THECOLLECTIVE/Deployer
+# Deploy a project to DO
+./deploy.sh do marie
+
+# Deploy to AWS
+./deploy.sh aws marie
 ```
 
-## Day-to-day: deploying changes
+## Adding a new project
 
-After pushing code to GitHub from the dev laptop:
+### 1. Deploy key
 
 ```bash
-# Deploy a project (pulls latest code on VM + rebuilds containers)
-./deploy.sh marie
-
-# Deploy infrastructure changes
-./deploy.sh infra
-
-# Deploy everything
-./deploy.sh --all
+ssh isidora 'ssh-keygen -t ed25519 -f ~/.ssh/github_deploy_<project> -N ""'
+ssh isidora 'cat ~/.ssh/github_deploy_<project>.pub'
 ```
 
-## First-time: bootstrapping the VM
+Add at `https://github.com/<user>/<repo>/settings/keys` (read-only).
 
-If the VM is completely fresh (no Docker, no Git):
+### 2. Project compose files
+
+Each project has two compose files:
+
+- **`docker-compose.yml`** — local dev (volume mounts, hot reload, no Traefik labels)
+- **`docker-compose.prod.yml`** — any server (production builds, Traefik labels, healthchecks)
+
+Differences between servers live in `.env` only (`DOMAIN`, `DATABASE_URL`).
+
+### 3. Database
 
 ```bash
-ssh ubuntu@10.251.8.172 'curl -fsSL https://raw.githubusercontent.com/jordimo/THECOLLECTIVE_AWS_INFRA/main/bootstrap.sh | bash'
+ssh isidora
+docker exec -it postgres psql -U caitie_admin_db
+CREATE DATABASE <project>;
 ```
 
-Then set the Postgres password:
+### 4. Langfuse setup
 
-```bash
-ssh aws01 'echo "POSTGRES_PASSWORD=<from-bitwarden>" > /app/Deployer/traefik/.env'
-ssh aws01 'echo "LANGFUSE_SECRET=<from-bitwarden>" >> /app/Deployer/traefik/.env'
-ssh aws01 'echo "LANGFUSE_SALT=<from-bitwarden>" >> /app/Deployer/traefik/.env'
-ssh aws01 'cd /app/Deployer && ./start.sh'
-```
+Langfuse provides LLM observability (tracing, prompt management, evaluations).
 
-## First-time: adding a new project
+**First-time setup (per environment):**
 
-### 1. Set up a deploy key on the VM
+1. Access Langfuse UI:
+   - Local: `https://langfuse.local` or `http://localhost:3030`
+   - Server: `ssh -L 3030:localhost:3030 isidora`, then open `http://localhost:3030`
+2. Create an account (first user becomes admin)
 
-```bash
-# Generate key (one-time)
-ssh aws01 'ssh-keygen -t ed25519 -f ~/.ssh/github_deploy_<project> -N ""'
-ssh aws01 'cat ~/.ssh/github_deploy_<project>.pub'
-```
+**Per-project setup:**
 
-Add the public key at `https://github.com/<user>/<repo>/settings/keys` → read-only.
-
-If this is a second deploy key, update `~/.ssh/config` on the VM to map each key to the right repo.
-
-### 2. Add `docker-compose.vm.yml` to the project repo
-
-Same as `docker-compose.yml` but adapted for the VM:
-- Network: `traefik-public` (external)
-- No volume mounts (no hot reload)
-- `restart: unless-stopped`
-- `NODE_ENV=production`
-
-### 3. Add `.env.example.vm` to the project repo
-
-Template for VM-specific env vars. Use the shared Postgres (`postgres:5432`) and Langfuse (`langfuse:3000`).
-
-### 4. Run init-project.sh
-
-```bash
-./init-project.sh <name> git@github.com:<user>/<repo>.git
-```
-
-This clones the repo, creates the DB, pauses for `.env` setup, registers Traefik routing, builds containers, runs migrations, and creates the admin user.
-
-### 5. Store secrets in Bitwarden
-
-Add all `.env` values to the `THECOLLECTIVE_AWS01` Secure Note as hidden custom fields.
-
-## Scripts reference
-
-| Script | Run from | Purpose |
-|--------|----------|---------|
-| `bootstrap.sh` | VM (first time) | Install Docker, Git, clone repo |
-| `setup.sh` | VM | Create network, scaffold `.env` |
-| `start.sh` | VM | Start Traefik + Postgres + Redis + Langfuse |
-| `stop.sh` | VM | Stop infrastructure |
-| `project.sh add <name>` | VM | Register Traefik routing for a project |
-| `project.sh rm <name>` | VM | Remove Traefik routing |
-| `project.sh ls` | VM | List registered projects |
-| `init-project.sh` | Corporate laptop | Full first-time project setup |
-| `deploy.sh` | Corporate laptop | Pull + rebuild (day-to-day deploys) |
-
-## SSH access
-
-```bash
-ssh aws01                              # Shell on the VM
-ssh -L 3030:localhost:3030 aws01       # Langfuse UI → http://localhost:3030
-ssh -L 8080:localhost:8080 aws01       # Traefik dashboard → http://localhost:8080
-```
+1. Open Langfuse UI → **New Project** → name it after the app (e.g. "Marie")
+2. Go to **Settings → API Keys → Create API Key**
+3. Add to the project's `.env`:
+   ```env
+   LANGFUSE_BASE_URL=http://langfuse:3000
+   LANGFUSE_PUBLIC_KEY=pk-lf-...
+   LANGFUSE_SECRET_KEY=sk-lf-...
+   ```
+   (Containers reach Langfuse via Docker network, not the SSH tunnel)
 
 ## Secrets
 
-All secrets are in Bitwarden under the `THECOLLECTIVE_AWS01` Secure Note. Convention: if it goes in a `.env` file, it goes in Bitwarden.
+All server secrets are in Bitwarden:
+- **THECOLLECTIVE_AWS01** Secure Note — AWS credentials and env vars
+- DO secrets stored similarly
+
+Convention: if it goes in `.env`, it goes in Bitwarden.
