@@ -89,6 +89,28 @@ Internal server. Path-based routing, no TLS (VPN access only). Uses `traefik/doc
 
 Uses `~/Dev/infra/` with mkcert TLS and `*.local` domains. Same compose file as servers, with `.env.example.local` for local-specific settings. Mailpit enabled via `COMPOSE_PROFILES=local`.
 
+## Day-to-day: deploying
+
+All scripts run from this repo (`~/Dev/infra/`). They SSH into the server, pull the latest code, and rebuild.
+
+```bash
+# Deploy a project
+./deploy.sh --target do:isidora marie
+
+# Deploy infra (git pull + restart services)
+./deploy.sh --target do:isidora infra
+
+# Deploy everything (infra + all projects)
+./deploy.sh --target do:isidora --all
+
+# AWS
+./deploy.sh --target aws marie
+```
+
+The deploy script doesn't need the git URL — the repo is already cloned on the server (set up by `init-project.sh`). It just does `git pull && docker compose up -d --build`.
+
+If a project isn't found, the script suggests running `init-project.sh`.
+
 ## Adding a new project
 
 ### Using `init-project.sh` (recommended)
