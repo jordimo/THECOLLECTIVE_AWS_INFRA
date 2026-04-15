@@ -121,6 +121,8 @@ Options:
 - `--repo` — Git repo URL (clones if directory doesn't exist)
 - `--db` — Database name (defaults to project name)
 
+**After running the script**, update `docs/plans/infra-unification.md` → `registry.yml` with the new app entry (domain, containers, ports, db, redis_db).
+
 ### Manual setup
 
 If you prefer manual steps or the script doesn't fit your case:
