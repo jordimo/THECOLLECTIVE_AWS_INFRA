@@ -371,12 +371,12 @@ Postgres data lives in Docker volumes. Renaming containers or networks does not 
 
 ### Steps
 
-#### Phase 1: Local dev (no risk)
+#### Phase 1: Local dev (no risk) ✅ DONE (2026-04-15)
 
-1. Rename `local-dev` network to `infra` in local-infra
-2. Rename containers: `local_postgres` → `postgres`, `local_redis` → `redis`, `local_traefik` → `traefik`
-3. Update all project `docker-compose.yml` files to use `infra` network
-4. Rebuild local infra from scratch (no persistent data concerns on dev)
+1. ~~Rename `local-dev` network to `infra` in local-infra~~
+2. ~~Rename containers: `local_postgres` → `postgres`, `local_redis` → `redis`, `local_traefik` → `traefik`~~
+3. ~~Update all project `docker-compose.yml` files to use `infra` network~~
+4. ~~Rebuild local infra from scratch (no persistent data concerns on dev)~~
 
 #### Phase 2: AWS (low risk, currently broken anyway)
 
@@ -387,7 +387,7 @@ Postgres data lives in Docker volumes. Renaming containers or networks does not 
 5. Projects use `docker-compose.prod.yml` with AWS-specific `.env` (`DOMAIN` not used, path routing via override labels)
 6. Replace `docker-compose.vm.yml` with `docker-compose.prod.yml` in Marie
 
-#### Phase 3: DO (careful, has production data)
+#### Phase 3: DO (careful, has production data) ✅ DONE (2026-04-15)
 
 **Projects to migrate:** marie, caitie, newsintel, company-intel, vaultwarden
 
