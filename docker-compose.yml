@@ -25,16 +25,28 @@ services:
       - --api.insecure=${TRAEFIK_INSECURE:-false}
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      # Trust XFF/CF-Connecting-IP from Cloudflare (origin is behind CF proxy)
+      - --entrypoints.websecure.forwardedHeaders.trustedIPs=${TRUSTED_PROXY_IPS:-127.0.0.1/32}
+      - --entrypoints.web.forwardedHeaders.trustedIPs=${TRUSTED_PROXY_IPS:-127.0.0.1/32}
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=infra
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
+      # HTTP-01 resolver (legacy, kept for transition — remove once all certs are DNS-01)
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-noop@localhost}
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # DNS-01 resolver via Cloudflare (primary — works behind CF proxy)
+      - --certificatesresolvers.letsencrypt-dns.acme.email=${ACME_EMAIL:-noop@localhost}
+      - --certificatesresolvers.letsencrypt-dns.acme.storage=/letsencrypt/acme-dns.json
+      - --certificatesresolvers.letsencrypt-dns.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt-dns.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.letsencrypt-dns.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53
       - --log.level=INFO
       - --ping=true
+    environment:
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN:-}
     ports:
       - "80:80"
       - "443:443"

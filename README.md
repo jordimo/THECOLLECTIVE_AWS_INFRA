@@ -62,7 +62,7 @@ docker compose up -d
 
 ### DigitalOcean — isidora (174.138.33.106)
 
-Primary production server. Host-based routing with Let's Encrypt TLS.
+Primary production server. Host-based routing with Let's Encrypt TLS (DNS-01 via Cloudflare). All public domains sit behind the Cloudflare proxy (orange cloud) — origin IP is not reachable from typical corporate networks running SSL inspection.
 
 ```
 /home/deploy/
@@ -199,7 +199,13 @@ NODE_ENV=production
 
 #### 4. DNS (DO only)
 
-Add an A record in Cloudflare: `acme.lostriver.llc → 174.138.33.106`
+In Cloudflare for `lostriver.llc`:
+1. Add an A record: `acme.lostriver.llc → 174.138.33.106`
+2. **Enable the orange-cloud proxy** on the record (this is the default convention)
+
+Why proxied: corp SSL-inspection filters often block traffic to DigitalOcean IP ranges. Cloudflare IPs are universally trusted. Also hides origin IP and adds DDoS / edge caching.
+
+Certs are issued via DNS-01 ACME challenge using `CF_DNS_API_TOKEN` in infra `.env`, so the orange cloud doesn't break renewals. Cache bypass rule for `/api/*` is already configured zone-wide.
 
 #### 5. Langfuse integration
 

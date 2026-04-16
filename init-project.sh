@@ -314,10 +314,14 @@ fi
 # ---------------------------------------------------------------------------
 # 5. DNS reminder (DO only)
 # ---------------------------------------------------------------------------
-if [ "$TARGET" = "do" ] && [ -n "$DOMAIN" ]; then
+if [[ "$TARGET" = do:* ]] && [ -n "$DOMAIN" ]; then
     echo ""
-    warn "DNS: Add an A record in Cloudflare:"
-    echo "    ${DOMAIN} → 174.138.33.106"
+    warn "DNS: In the Cloudflare dashboard for lostriver.llc:"
+    echo "    1. Add an A record: ${DOMAIN} → 174.138.33.106"
+    echo "    2. Enable the orange-cloud proxy on the record (bypasses corp SSL filters,"
+    echo "       hides origin IP, adds DDoS protection, edge caching)"
+    echo ""
+    echo "  Certs are issued via DNS-01 using CF_DNS_API_TOKEN, so proxy is safe."
     echo ""
     read -rp "  Press Enter when DNS is configured (or Ctrl+C to skip)..."
 fi
