@@ -1,33 +1,8 @@
 # Traefik Dynamic Configuration
-# Health check endpoint, security headers, rate limiting
+# Security headers, rate limiting, TLS options
 
 http:
-  routers:
-    health-check:
-      rule: "Path(`/health`)"
-      service: api-health
-      middlewares:
-        - health-rewrite
-      entryPoints:
-        - web
-
-  services:
-    api-health:
-      loadBalancer:
-        servers:
-          - url: "http://caitie-api:3000"
-        healthCheck:
-          path: "/api/health"
-          interval: "10s"
-          timeout: "3s"
-
   middlewares:
-    # Health check path rewrite
-    health-rewrite:
-      replacePathRegex:
-        regex: "^/health$"
-        replacement: "/api/health"
-
     # Rate limiting middleware
     rate-limit:
       rateLimit:
