@@ -198,7 +198,7 @@ services:
     image: langfuse/langfuse:2
     port: 3000
     external_port: 3030
-    env_var: LANGFUSE_BASE_URL
+    env_var: LANGFUSE_BASEURL
     env_template: "http://langfuse:3000"
     dev_exposed: true
     prod_exposed: false
@@ -335,7 +335,7 @@ Same file on local, DO, AWS. Only difference is `.env` (Postgres password, TLS c
 | Langfuse | `langfuse:3000` | `https://langfuse.local` | SSH tunnel `localhost:3030` |
 | Traefik | N/A | `https://*.local` | Ports 80/443 |
 
-Projects connect to Langfuse via `LANGFUSE_BASE_URL`:
+Projects connect to Langfuse via `LANGFUSE_BASEURL`:
 - **Local:** `https://langfuse.local` or `http://langfuse:3000`
 - **Servers:** `http://langfuse:3000` (internal Docker network, no tunnel needed from containers)
 
@@ -576,7 +576,7 @@ JWT_EXPIRES_IN_SECONDS=604800
 PORT=3000
 NODE_ENV=production
 NOTIFICATIONS_ENABLED=false
-LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_BASEURL=https://cloud.langfuse.com
 LANGFUSE_SECRET_KEY=
 LANGFUSE_PUBLIC_KEY=
 RESEND_API_KEY=

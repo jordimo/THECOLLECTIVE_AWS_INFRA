@@ -198,7 +198,7 @@ JWT_SECRET=
 OPENAI_API_KEY=
 
 # --- Langfuse (per-project keys from Langfuse UI) ---
-LANGFUSE_BASE_URL=http://langfuse:3000
+LANGFUSE_BASEURL=http://langfuse:3000
 LANGFUSE_PUBLIC_KEY=
 LANGFUSE_SECRET_KEY=
 
@@ -224,7 +224,7 @@ Certs are issued via DNS-01 ACME challenge using `CF_DNS_API_TOKEN` in infra `.e
 3. **Settings → API Keys → Create API Key**
 4. Add to the project's `.env`:
    ```env
-   LANGFUSE_BASE_URL=http://langfuse:3000
+   LANGFUSE_BASEURL=http://langfuse:3000
    LANGFUSE_PUBLIC_KEY=pk-lf-...
    LANGFUSE_SECRET_KEY=sk-lf-...
    ```
