@@ -117,38 +117,6 @@ services:
         max-file: "3"
 
   # ---------------------------------------------------------------------------
-  # Neo4j 5 Community - Graph DB
-  # ---------------------------------------------------------------------------
-  neo4j:
-    image: neo4j:5-community
-    container_name: neo4j
-    restart: unless-stopped
-    environment:
-      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/neo4j-local-dev-password}
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: 'apoc.*'
-      NEO4J_server_memory_heap_initial__size: 512m
-      NEO4J_server_memory_heap_max__size: 1g
-    ports:
-      - "${NEO4J_BOLT_BIND:-0.0.0.0}:7687:7687"
-      - "${NEO4J_HTTP_BIND:-0.0.0.0}:7474:7474"
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-    networks:
-      - infra
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:7474/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ---------------------------------------------------------------------------
   # Langfuse v3 - LLM Observability
   # ---------------------------------------------------------------------------
   # v3 splits the v2 single-container design into web + worker, and adds
@@ -159,193 +127,6 @@ services:
   # Postgres → ClickHouse backfill runs on a version that still knows the
   # v2 schema. After the backfill completes, bump to `:3` (latest).
   # ---------------------------------------------------------------------------
-  langfuse-web:
-    image: langfuse/langfuse:${LANGFUSE_IMAGE_TAG:-3}
-    container_name: langfuse-web
-    restart: unless-stopped
-    environment:
-      # --- Postgres (transactional: users, orgs, projects, prompts, API keys) ---
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/langfuse
-      # --- Auth / crypto ---
-      - NEXTAUTH_SECRET=${LANGFUSE_SECRET:-local-langfuse-secret-dev-only}
-      - NEXTAUTH_URL=${LANGFUSE_URL:-http://localhost:3030}
-      - SALT=${LANGFUSE_SALT:-local-langfuse-salt-dev-only}
-      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY}
-      - TELEMETRY_ENABLED=false
-      # --- Clickhouse (traces, observations, scores) ---
-      - CLICKHOUSE_URL=http://clickhouse:8123
-      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-clickhouse}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_CLUSTER_ENABLED=false
-      # --- Redis (ingestion queue + cache) — shared redis service, no auth ---
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_AUTH=${REDIS_AUTH:-}
-      # --- S3 / MinIO (event + media uploads) ---
-      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
-      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
-      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
-      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
-      - LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/
-      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse
-      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
-      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
-      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://minio:9000
-      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
-      - LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=media/
-      # --- Local dev seeding (kept from v2 — ignored after first boot) ---
-      - LANGFUSE_INIT_ORG_ID
-      - LANGFUSE_INIT_ORG_NAME
-      - LANGFUSE_INIT_USER_EMAIL
-      - LANGFUSE_INIT_USER_NAME
-      - LANGFUSE_INIT_USER_PASSWORD
-    ports:
-      - "${LANGFUSE_BIND:-0.0.0.0}:3030:3000"
-    mem_limit: 1536m
-    depends_on:
-      postgres:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      infra:
-        # Keep resolving the v2 container name `langfuse` so existing projects
-        # (Betty, Marie) pointing at http://langfuse:3000 don't need env
-        # changes. Drop once all consumers have migrated to `langfuse-web`.
-        aliases:
-          - langfuse
-    labels:
-      - "traefik.enable=${LANGFUSE_TRAEFIK:-false}"
-      - "traefik.http.routers.langfuse.rule=Host(`langfuse.local`)"
-      - "traefik.http.routers.langfuse.entrypoints=websecure"
-      - "traefik.http.routers.langfuse.tls=true"
-      - "traefik.http.services.langfuse.loadbalancer.server.port=3000"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  langfuse-worker:
-    image: langfuse/langfuse-worker:${LANGFUSE_IMAGE_TAG:-3}
-    container_name: langfuse-worker
-    restart: unless-stopped
-    environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/langfuse
-      - SALT=${LANGFUSE_SALT:-local-langfuse-salt-dev-only}
-      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY}
-      - TELEMETRY_ENABLED=false
-      - CLICKHOUSE_URL=http://clickhouse:8123
-      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-clickhouse}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_CLUSTER_ENABLED=false
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_AUTH=${REDIS_AUTH:-}
-      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
-      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
-      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
-      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
-      - LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/
-      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse
-      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
-      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
-      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://minio:9000
-      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
-      - LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=media/
-    mem_limit: 512m
-    depends_on:
-      postgres:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - infra
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  clickhouse:
-    image: clickhouse/clickhouse-server:25.3
-    container_name: clickhouse
-    restart: unless-stopped
-    user: "101:101"
-    environment:
-      CLICKHOUSE_DB: default
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - clickhouse_logs:/var/log/clickhouse-server
-    mem_limit: 512m
-    networks:
-      - infra
-    healthcheck:
-      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    restart: unless-stopped
-    entrypoint: sh
-    # create the 'langfuse' bucket before starting the service
-    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    ports:
-      - "${MINIO_BIND:-127.0.0.1}:9091:9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - infra
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ---------------------------------------------------------------------------
-  # Umami - Web Analytics
-  # ---------------------------------------------------------------------------
-  # Setup after first start:
-  #   1. Open http://localhost:3040 (or https://analytics.lostriver.llc on DO)
-  #   2. Login with admin / umami (change password immediately)
-  #   3. Add a website → copy the tracking script to your app's <head>
-  #   4. For custom events (Mac apps), use the POST /api/send endpoint
   umami:
     image: docker.umami.is/umami-software/umami:postgresql-latest@sha256:28f263fe06f79ebffa5a6a6e9bd33b7a278e9342a88e0bdac812416c9f9e4361
     container_name: umami
@@ -426,6 +207,27 @@ services:
       - "traefik.http.routers.mailpit.tls=true"
       - "traefik.http.services.mailpit.loadbalancer.server.port=8025"
 
+  neo4j:
+    image: neo4j:5-community
+    container_name: neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/neo4j-local-dev-password}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: 'apoc.*'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - infra
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:7474 > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 networks:
   infra:
     name: infra
@@ -440,12 +242,6 @@ volumes:
     name: ${TRAEFIK_VOLUME:-traefik_letsencrypt}
   vaultwarden_data:
     name: ${VAULTWARDEN_VOLUME:-vaultwarden_data}
-  clickhouse_data:
-    name: ${CLICKHOUSE_VOLUME:-clickhouse_data}
-  clickhouse_logs:
-    name: ${CLICKHOUSE_LOGS_VOLUME:-clickhouse_logs}
-  minio_data:
-    name: ${MINIO_VOLUME:-minio_data}
   neo4j_data:
     name: ${NEO4J_VOLUME:-neo4j_data}
   neo4j_logs:
