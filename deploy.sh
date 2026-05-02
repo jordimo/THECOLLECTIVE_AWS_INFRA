@@ -8,9 +8,9 @@
 #   ./deploy.sh --target <target> --all        Deploy infra + all projects
 #
 # Examples:
-#   ./deploy.sh --target do:isidora marie
-#   ./deploy.sh --target do:isidora infra
-#   ./deploy.sh --target do:isidora --all
+#   ./deploy.sh --target do:zora marie
+#   ./deploy.sh --target do:zora infra
+#   ./deploy.sh --target do:zora --all
 #   ./deploy.sh --target aws marie
 #
 # =============================================================================
@@ -29,13 +29,13 @@ usage() {
     echo "Usage: ./deploy.sh --target <target> <project|infra|--all>"
     echo ""
     echo "Targets:"
-    echo "  do:<droplet>   DigitalOcean (e.g. do:isidora)"
+    echo "  do:<droplet>   DigitalOcean (e.g. do:zora)"
     echo "  aws            AWS (aws01)"
     echo ""
     echo "Examples:"
-    echo "  ./deploy.sh --target do:isidora marie"
-    echo "  ./deploy.sh --target do:isidora infra"
-    echo "  ./deploy.sh --target do:isidora --all"
+    echo "  ./deploy.sh --target do:zora marie"
+    echo "  ./deploy.sh --target do:zora infra"
+    echo "  ./deploy.sh --target do:zora --all"
     exit 1
 }
 

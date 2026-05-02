@@ -2,7 +2,7 @@
 # =============================================================================
 # Initialize a new project
 # =============================================================================
-# Works on any environment: local dev, DO (isidora), AWS (aws01).
+# Works on any environment: local dev, DO (zora), AWS (aws01).
 #
 # Usage:
 #   ./init-project.sh <name> [options]
@@ -11,11 +11,11 @@
 #   # Local
 #   ./init-project.sh acme --target local --dir ~/Dev/THECOLLECTIVE/Acme
 #
-#   # DO (isidora) — clone from GitHub
-#   ./init-project.sh acme --target do:isidora --repo git@github.com:jordimo/Acme.git
+#   # DO (zora) — clone from GitHub
+#   ./init-project.sh acme --target do:zora --repo git@github.com:jordimo/Acme.git
 #
-#   # DO (isidora) — project already on server
-#   ./init-project.sh acme --target do:isidora --dir /home/deploy/acme
+#   # DO (zora) — project already on server
+#   ./init-project.sh acme --target do:zora --dir /home/deploy/acme
 #
 # Options:
 #   --target <target>          Required. One of: local, do:<droplet>, aws
@@ -33,7 +33,7 @@
 #
 # Prerequisites:
 #   - Infrastructure running (Traefik, Postgres, Redis on 'infra' network)
-#   - For servers: SSH alias configured (isidora, aws01)
+#   - For servers: SSH alias configured (zora, aws01)
 #   - For servers: deploy key added to the GitHub repo
 # =============================================================================
 
@@ -58,7 +58,7 @@ usage() {
     echo ""
     echo "Targets:"
     echo "  local            Local dev"
-    echo "  do:<droplet>     DigitalOcean (e.g. do:isidora)"
+    echo "  do:<droplet>     DigitalOcean (e.g. do:zora)"
     echo "  aws              AWS (aws01)"
     echo ""
     echo "Options:"
@@ -68,7 +68,7 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  ./init-project.sh acme --target local --dir ~/Dev/Acme"
-    echo "  ./init-project.sh acme --target do:isidora --repo git@github.com:jordimo/Acme.git"
+    echo "  ./init-project.sh acme --target do:zora --repo git@github.com:jordimo/Acme.git"
     exit 1
 }
 
@@ -317,7 +317,7 @@ fi
 if [[ "$TARGET" = do:* ]] && [ -n "$DOMAIN" ]; then
     echo ""
     warn "DNS: In the Cloudflare dashboard for lostriver.llc:"
-    echo "    1. Add an A record: ${DOMAIN} → 174.138.33.106"
+    echo "    1. Add an A record: ${DOMAIN} → 178.156.133.68"
     echo "    2. Enable the orange-cloud proxy on the record (bypasses corp SSL filters,"
     echo "       hides origin IP, adds DDoS protection, edge caching)"
     echo ""
